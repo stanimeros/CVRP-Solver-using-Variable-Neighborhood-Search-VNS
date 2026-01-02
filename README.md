@@ -23,7 +23,7 @@
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/stanimeros/CVRP-Solver-using-Variable-Neighborhood-Search-VNS.git
 cd project
 
 # Create virtual environment (recommended)
