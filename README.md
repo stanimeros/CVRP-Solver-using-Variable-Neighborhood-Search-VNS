@@ -14,6 +14,50 @@
 - **Visualization**: Γραφική απεικόνιση των διαδρομών με matplotlib
 - **Benchmarking**: Σύγκριση με best-known solutions
 
+## Quick Start
+
+### Clone and Setup
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd project
+
+# Create virtual environment (recommended)
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+```
+
+### Run Benchmarks
+
+```bash
+# Run benchmark on all CVRP instances (100 instances)
+python benchmark.py
+
+# Run benchmark on small test set (3 instances)
+python benchmark.py --instances instances/cvrp_benchmark
+
+# Custom parameters
+python benchmark.py --instances instances/cvrp --iterations 2000 --seed 42
+```
+
+Results will be saved in `visualizations/` folder with:
+- Comparison plots for each instance
+- Summary report (`benchmark_summary.txt`)
+
+### Solve Single Instance
+
+```bash
+# Solve with example instance
+python main.py --example
+
+# Solve with specific instance
+python main.py --instance instances/cvrp/X-n101-k25.vrp
+```
+
 ## Εγκατάσταση
 
 ```bash
@@ -37,16 +81,29 @@ python main.py --instance instance.vrp --iterations 2000 --seed 42
 
 ### Benchmarking - Σύγκριση με Best-known Solutions
 
+Το benchmark script εκτελεί VNS σε όλα τα instances και συγκρίνει με best-known solutions:
+
 ```bash
-python benchmark.py --instances instances/cvrp --output visualizations
+# Default: Run on all 100 CVRP instances
+python benchmark.py
+
+# Quick test on 3 instances
+python benchmark.py --instances instances/cvrp_benchmark
+
+# Custom output directory
+python benchmark.py --output my_results
 ```
+
+**Output:**
+- `visualizations/` folder: Comparison plots για κάθε instance
+- `visualizations/benchmark_summary.txt`: Summary report με gaps από best-known solutions
 
 Το benchmark script:
 - Φορτώνει όλα τα instances από τον καθορισμένο φάκελο
 - Εκτελεί VNS solver για κάθε instance
 - Συγκρίνει με best-known solutions (αν διαθέσιμα)
-- Αποθηκεύει γραφήματα στο `visualizations/` folder
-- Δημιουργεί summary report με gaps
+- Υπολογίζει gap percentage από optimal
+- Αποθηκεύει γραφήματα και summary report
 
 ### Παράμετροι main.py
 
@@ -67,6 +124,22 @@ python benchmark.py --instances instances/cvrp --output visualizations
 - `--seed, -s`: Random seed (default: 42)
 
 ## Δομή Project
+
+```
+project/
+├── main.py              # VNS solver για single instances
+├── benchmark.py         # Benchmark script για σύγκριση
+├── cvrp.py             # VNS implementation
+├── vrplib_loader.py    # Instance loader
+├── visualization.py     # Plotting functions
+├── requirements.txt     # Dependencies
+├── instances/
+│   ├── cvrp/           # 100 CVRP instances + solutions
+│   └── cvrp_benchmark/ # 3 test instances
+└── visualizations/     # Output folder για plots
+```
+
+### Αρχεία
 
 - `cvrp.py`: Κύρια υλοποίηση του VNS solver και CVRP data structures
 - `vrplib_loader.py`: Loader για VRPLIB format instances (με υποστήριξη vrplib package)
