@@ -173,6 +173,31 @@ plot_solution(solution)
 - **Scalability**: Επιτυχημένη επίλυση instances με 100+ πελάτες σε δευτερόλεπτα έως λεπτά
 - **Reproducibility**: Deterministic αποτελέσματα με fixed random seed
 
+### Benchmark Results
+
+Αποτελέσματα από benchmark σε 3 test instances:
+
+| Instance | Customers | VNS Distance | Best-Known | Gap | Routes |
+|----------|-----------|--------------|------------|-----|--------|
+| X-n106-k14 | 105 | 26,639.14 | 26,362.00 | 1.05% | 14 |
+| X-n101-k25 | 100 | 28,083.52 | 27,591.00 | 1.79% | 27 |
+| X-n110-k13 | 109 | 14,978.22 | 14,971.00 | 0.05% | 13 |
+
+**Average gap: 0.96%** - Όλες οι λύσεις είναι feasible!
+
+### Visualization Examples
+
+Παρακάτω φαίνονται οι γραφικές απεικονίσεις των λύσεων για τα benchmark instances:
+
+#### X-n101-k25 (100 customers, 27 routes, Gap: 1.79%)
+![X-n101-k25 Solution](https://github.com/stanimeros/CVRP-Solver-using-Variable-Neighborhood-Search-VNS/blob/main/visualizations/X-n101-k25_comparison.png?raw=true)
+
+#### X-n106-k14 (105 customers, 14 routes, Gap: 1.05%)
+![X-n106-k14 Solution](https://github.com/stanimeros/CVRP-Solver-using-Variable-Neighborhood-Search-VNS/blob/main/visualizations/X-n106-k14_comparison.png?raw=true)
+
+#### X-n110-k13 (109 customers, 13 routes, Gap: 0.05%)
+![X-n110-k13 Solution](https://github.com/stanimeros/CVRP-Solver-using-Variable-Neighborhood-Search-VNS/blob/main/visualizations/X-n110-k13_comparison.png?raw=true)
+
 ## Απαιτήσεις
 
 - Python 3.7+
