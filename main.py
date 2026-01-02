@@ -7,9 +7,8 @@ Main script for solving CVRP using Variable Neighborhood Search (VNS)
 
 import argparse
 import sys
-import os
 from pathlib import Path
-from cvrp import VNS, CVRPInstance
+from cvrp import VNS
 from vrplib_loader import load_vrplib_instance, create_simple_instance
 from visualization import plot_solution, print_solution_info
 import matplotlib

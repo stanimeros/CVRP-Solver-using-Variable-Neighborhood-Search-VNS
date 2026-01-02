@@ -4,9 +4,8 @@ Capacitated Vehicle Routing Problem (CVRP) Solver using Variable Neighborhood Se
 
 import math
 import random
-import copy
 import time
-from typing import List, Tuple, Optional
+from typing import List, Optional
 from dataclasses import dataclass
 
 
@@ -103,16 +102,6 @@ class VNS:
             return self.instance.distance(self.instance.customers[cid1], self.instance.depot)
         else:
             return self.instance.distance(self.instance.customers[cid1], self.instance.customers[cid2])
-    
-    def _route_distance(self, route: List[int]) -> float:
-        """Calculate total distance of a route including depot connections (O(n))"""
-        if not route:
-            return 0.0
-        dist = self._distance(-1, route[0])  # Depot to first
-        for i in range(len(route) - 1):
-            dist += self._distance(route[i], route[i + 1])
-        dist += self._distance(route[-1], -1)  # Last to depot
-        return dist
     
     def initial_solution(self) -> Solution:
         """Generate initial solution using nearest neighbor heuristic"""

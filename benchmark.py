@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 
-from cvrp import VNS, Solution, CVRPInstance
+from cvrp import VNS
 from vrplib_loader import load_vrplib_instance, load_best_known_solution
 from visualization import plot_solution, print_solution_info
 
