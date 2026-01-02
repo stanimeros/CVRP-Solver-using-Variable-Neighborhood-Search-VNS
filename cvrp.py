@@ -449,6 +449,100 @@ class VNS:
         
         return False
     
+    def two_opt_star(self, solution: Solution) -> bool:
+        """2-opt* neighborhood: exchange tails of two different routes (delta evaluation)"""
+        if len(solution.routes) < 2:
+            return False
+        
+        best_gain = 0.0
+        best_r1_idx = -1
+        best_i = -1
+        best_r2_idx = -1
+        best_j = -1
+        
+        for r1_idx in range(len(solution.routes)):
+            route1 = solution.routes[r1_idx]
+            if len(route1) < 1:
+                continue
+            
+            route1_demand = solution.get_route_demand(route1)
+            
+            for r2_idx in range(r1_idx + 1, len(solution.routes)):
+                route2 = solution.routes[r2_idx]
+                if len(route2) < 1:
+                    continue
+                
+                route2_demand = solution.get_route_demand(route2)
+                
+                # Try all positions in route1
+                for i in range(len(route1)):
+                    # Try all positions in route2
+                    for j in range(len(route2)):
+                        # 2-opt*: exchange tails
+                        # New route1: route1[0..i] + route2[j+1..end]
+                        # New route2: route2[0..j] + route1[i+1..end]
+                        
+                        # Calculate demands for new routes
+                        route1_head_demand = sum(self.instance.customers[route1[k]].demand for k in range(i + 1))
+                        route1_tail_demand = route1_demand - route1_head_demand
+                        route2_head_demand = sum(self.instance.customers[route2[k]].demand for k in range(j + 1))
+                        route2_tail_demand = route2_demand - route2_head_demand
+                        
+                        # Check capacity constraints
+                        new_route1_demand = route1_head_demand + route2_tail_demand
+                        new_route2_demand = route2_head_demand + route1_tail_demand
+                        
+                        if (new_route1_demand > self.instance.capacity or 
+                            new_route2_demand > self.instance.capacity):
+                            continue
+                        
+                        # Get the nodes involved
+                        node_i = route1[i]
+                        node_i_next = route1[i + 1] if i + 1 < len(route1) else -1  # Depot if last
+                        node_j = route2[j]
+                        node_j_next = route2[j + 1] if j + 1 < len(route2) else -1  # Depot if last
+                        
+                        # Calculate removed edges
+                        removed1 = self._distance(node_i, node_i_next)
+                        removed2 = self._distance(node_j, node_j_next)
+                        
+                        # Calculate added edges (2-opt* connections)
+                        added1 = self._distance(node_i, node_j_next)
+                        added2 = self._distance(node_j, node_i_next)
+                        
+                        # Calculate gain
+                        gain = (removed1 + removed2) - (added1 + added2)
+                        
+                        # Check if this creates better routes
+                        if gain > best_gain:
+                            best_gain = gain
+                            best_r1_idx = r1_idx
+                            best_i = i
+                            best_r2_idx = r2_idx
+                            best_j = j
+        
+        if best_gain > 0.0:
+            # Apply the best 2-opt* move
+            route1 = solution.routes[best_r1_idx]
+            route2 = solution.routes[best_r2_idx]
+            
+            # Exchange tails: route1[0..i] + route2[j+1..end] and route2[0..j] + route1[i+1..end]
+            new_route1 = route1[:best_i + 1] + route2[best_j + 1:]
+            new_route2 = route2[:best_j + 1] + route1[best_i + 1:]
+            
+            # Update routes
+            solution.routes[best_r1_idx] = new_route1
+            solution.routes[best_r2_idx] = new_route2
+            
+            # Remove empty routes
+            solution.routes = [r for r in solution.routes if r]
+            
+            # Update distance incrementally
+            solution.total_distance -= best_gain
+            return True
+        
+        return False
+    
     def local_search(self, solution: Solution) -> Solution:
         """Apply local search until no improvement"""
         improved = True
@@ -459,6 +553,10 @@ class VNS:
             for route_idx in range(len(solution.routes)):
                 if self.two_opt(solution, route_idx):
                     improved = True
+            
+            # Try 2-opt* (inter-route)
+            if self.two_opt_star(solution):
+                improved = True
             
             # Try relocate
             if self.relocate(solution):
@@ -475,42 +573,93 @@ class VNS:
         return solution
     
     def shake(self, solution: Solution, k: int) -> Solution:
-        """Shaking procedure: apply k random moves"""
+        """Ruin & Recreate shaking: remove k customers and reinsert using best insertion"""
         shaken = solution.copy()
         
-        for _ in range(k):
-            if len(shaken.routes) < 2:
-                break
-            
-            # Random relocate move
-            r1_idx = random.randint(0, len(shaken.routes) - 1)
-            if not shaken.routes[r1_idx]:
-                continue
-            
-            c1_idx = random.randint(0, len(shaken.routes[r1_idx]) - 1)
-            customer_id = shaken.routes[r1_idx][c1_idx]
-            customer = self.instance.customers[customer_id]
-            
-            # Find a valid route to insert
-            valid_routes = []
-            for r2_idx in range(len(shaken.routes)):
-                if r1_idx == r2_idx:
-                    continue
-                route2_demand = shaken.get_route_demand(shaken.routes[r2_idx])
-                if route2_demand + customer.demand <= self.instance.capacity:
-                    valid_routes.append(r2_idx)
-            
-            if valid_routes:
-                r2_idx = random.choice(valid_routes)
-                pos = random.randint(0, len(shaken.routes[r2_idx]))
-                
-                # Perform relocate
-                shaken.routes[r1_idx] = shaken.routes[r1_idx][:c1_idx] + shaken.routes[r1_idx][c1_idx+1:]
-                shaken.routes[r2_idx] = shaken.routes[r2_idx][:pos] + [customer_id] + shaken.routes[r2_idx][pos:]
-                
-                # Remove empty routes
-                shaken.routes = [r for r in shaken.routes if r]
+        if len(shaken.routes) == 0:
+            return shaken
         
+        # Calculate number of customers to ruin (proportional to k)
+        total_customers = sum(len(route) for route in shaken.routes)
+        if total_customers == 0:
+            return shaken
+        
+        # Ruin: remove k customers (or k% of customers, whichever is more meaningful)
+        num_to_ruin = min(k * 3, total_customers // 3)  # Remove up to k*3 customers or 1/3 of total
+        num_to_ruin = max(1, num_to_ruin)  # At least 1
+        
+        # Collect all customers with their route indices
+        customers_to_ruin = []
+        for r_idx, route in enumerate(shaken.routes):
+            for c_idx, customer_id in enumerate(route):
+                customers_to_ruin.append((r_idx, c_idx, customer_id))
+        
+        # Randomly select customers to ruin
+        if len(customers_to_ruin) > num_to_ruin:
+            ruined = random.sample(customers_to_ruin, num_to_ruin)
+        else:
+            ruined = customers_to_ruin.copy()
+        
+        # Sort by route index (descending) and position (descending) to avoid index shifting issues
+        ruined.sort(key=lambda x: (x[0], x[1]), reverse=True)
+        
+        # Remove ruined customers and track them
+        ruined_customers = []
+        for r_idx, c_idx, customer_id in ruined:
+            if r_idx < len(shaken.routes) and c_idx < len(shaken.routes[r_idx]):
+                shaken.routes[r_idx].pop(c_idx)
+                ruined_customers.append(customer_id)
+        
+        # Remove empty routes
+        shaken.routes = [r for r in shaken.routes if r]
+        
+        # Recreate: Reinsert customers using Best Insertion heuristic
+        random.shuffle(ruined_customers)  # Randomize insertion order
+        
+        for customer_id in ruined_customers:
+            customer = self.instance.customers[customer_id]
+            best_cost = float('inf')
+            best_r_idx = -1
+            best_pos = -1
+            
+            # Find best insertion position
+            for r_idx in range(len(shaken.routes)):
+                route = shaken.routes[r_idx]
+                route_demand = shaken.get_route_demand(route)
+                
+                # Check capacity
+                if route_demand + customer.demand > self.instance.capacity:
+                    continue
+                
+                # Try all insertion positions
+                for pos in range(len(route) + 1):
+                    # Calculate insertion cost (delta)
+                    if pos == 0:
+                        if route:
+                            cost = self._distance(-1, customer_id) + self._distance(customer_id, route[0]) - self._distance(-1, route[0])
+                        else:
+                            cost = self._distance(-1, customer_id) + self._distance(customer_id, -1)
+                    elif pos == len(route):
+                        cost = self._distance(route[-1], customer_id) + self._distance(customer_id, -1) - self._distance(route[-1], -1)
+                    else:
+                        prev_cid = route[pos - 1]
+                        next_cid = route[pos]
+                        cost = (self._distance(prev_cid, customer_id) + self._distance(customer_id, next_cid) - 
+                               self._distance(prev_cid, next_cid))
+                    
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_r_idx = r_idx
+                        best_pos = pos
+            
+            # Insert at best position (always insert, create new route if necessary)
+            if best_r_idx >= 0:
+                shaken.routes[best_r_idx].insert(best_pos, customer_id)
+            else:
+                # Create new route if no capacity available in existing routes
+                shaken.routes.append([customer_id])
+        
+        # Recalculate distance
         shaken.calculate_distance()
         return shaken
     
