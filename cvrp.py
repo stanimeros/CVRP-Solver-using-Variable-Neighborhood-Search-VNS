@@ -5,6 +5,7 @@ Capacitated Vehicle Routing Problem (CVRP) Solver using Variable Neighborhood Se
 import math
 import random
 import copy
+import time
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
@@ -84,10 +85,13 @@ class VNS:
     """Variable Neighborhood Search solver for CVRP"""
     
     def __init__(self, instance: CVRPInstance, max_iterations: int = 1000, 
-                 max_no_improvement: int = 100, random_seed: Optional[int] = None):
+                 max_no_improvement: int = 100, random_seed: Optional[int] = None,
+                 verbose: bool = True, time_limit: Optional[float] = None):
         self.instance = instance
         self.max_iterations = max_iterations
         self.max_no_improvement = max_no_improvement
+        self.verbose = verbose
+        self.time_limit = time_limit  # Time limit in seconds
         if random_seed is not None:
             random.seed(random_seed)
     
@@ -360,15 +364,131 @@ class VNS:
     
     def solve(self) -> Solution:
         """Main VNS algorithm"""
+        start_time = time.time()
+        
         # Generate initial solution
+        if self.verbose:
+            print("  Generating initial solution...", end=" ", flush=True)
+        init_start = time.time()
         current = self.initial_solution()
         current = self.local_search(current)
+        init_time = time.time() - init_start
         best = current.copy()
+        
+        if self.verbose:
+            print(f"✓ Initial distance: {best.total_distance:.2f} ({init_time:.1f}s)")
         
         k_max = 5  # Maximum neighborhood size
         no_improvement = 0
+        last_report_time = start_time
+        report_interval = 10.0  # Report every 10 seconds
+        last_improvement_time = start_time
+        last_improvement_iteration = 0
+        recent_iterations = []  # Track recent iteration times for better ETA
+        recent_times = []
         
         for iteration in range(self.max_iterations):
+            # Check time limit
+            elapsed_time = time.time() - start_time
+            if self.time_limit and elapsed_time > self.time_limit:
+                if self.verbose:
+                    print(f"\n  ⏱ Time limit reached ({self.time_limit:.0f}s)")
+                break
+            
+            # Progress reporting with time estimation
+            if self.verbose and (time.time() - last_report_time) >= report_interval:
+                elapsed = time.time() - start_time
+                progress = (iteration / self.max_iterations) * 100 if self.max_iterations > 0 else 0
+                
+                # Estimate remaining time
+                if iteration > 0:
+                    # Store recent iteration data for moving average
+                    recent_iterations.append(iteration)
+                    recent_times.append(elapsed)
+                    # Keep only last 5 data points
+                    if len(recent_iterations) > 5:
+                        recent_iterations.pop(0)
+                        recent_times.pop(0)
+                    
+                    # Calculate recent iteration rate (more accurate than overall)
+                    if len(recent_iterations) >= 2:
+                        recent_iter_diff = recent_iterations[-1] - recent_iterations[0]
+                        recent_time_diff = recent_times[-1] - recent_times[0]
+                        recent_rate = recent_iter_diff / recent_time_diff if recent_time_diff > 0 else 0
+                    else:
+                        recent_rate = iteration / elapsed if elapsed > 0 else 0
+                    
+                    # Overall rate as fallback
+                    iterations_per_second = iteration / elapsed if elapsed > 0 else 0
+                    remaining_iterations = self.max_iterations - iteration
+                    
+                    # Use recent rate if available, otherwise overall rate
+                    rate_to_use = recent_rate if recent_rate > 0 else iterations_per_second
+                    
+                    # Estimate based on iterations
+                    if rate_to_use > 0:
+                        eta_iterations = remaining_iterations / rate_to_use
+                    else:
+                        eta_iterations = float('inf')
+                    
+                    # Estimate based on convergence (no improvement threshold)
+                    iterations_since_improvement = iteration - last_improvement_iteration
+                    if iterations_since_improvement > 0 and no_improvement > 0 and rate_to_use > 0:
+                        # Estimate iterations until max_no_improvement is reached
+                        remaining_no_improvement = self.max_no_improvement - no_improvement
+                        if remaining_no_improvement > 0:
+                            # Estimate iterations needed to reach threshold
+                            iterations_to_threshold = remaining_no_improvement
+                            # Estimate time based on current iteration rate
+                            eta_convergence = iterations_to_threshold / rate_to_use
+                        else:
+                            eta_convergence = 0  # Already at threshold
+                    else:
+                        eta_convergence = float('inf')
+                    
+                    # If making regular improvements, algorithm likely to continue
+                    # If not improving, likely to hit convergence threshold soon
+                    # Use convergence estimate if it's reasonable, otherwise use iteration estimate
+                    if eta_convergence < float('inf') and eta_convergence < eta_iterations:
+                        # Likely to converge before max iterations
+                        eta_seconds = eta_convergence
+                        use_convergence_estimate = True
+                    else:
+                        # Will likely hit max iterations
+                        eta_seconds = eta_iterations
+                        use_convergence_estimate = False
+                    
+                    if eta_seconds < float('inf') and eta_seconds > 0:
+                        eta_minutes = int(eta_seconds // 60)
+                        eta_secs = int(eta_seconds % 60)
+                        if eta_minutes > 60:
+                            eta_hours = eta_minutes // 60
+                            eta_mins = eta_minutes % 60
+                            eta_str = f"ETA: ~{eta_hours}h {eta_mins}m"
+                        elif eta_minutes > 0:
+                            eta_str = f"ETA: ~{eta_minutes}m {eta_secs}s"
+                        else:
+                            eta_str = f"ETA: ~{eta_secs}s"
+                        
+                        # Add convergence warning if close to threshold
+                        if no_improvement > self.max_no_improvement * 0.7:
+                            eta_str += " (may stop early)"
+                        elif use_convergence_estimate:
+                            eta_str += " (est. convergence)"
+                        # If convergence estimate is much less than iteration estimate, note it
+                        elif eta_convergence < float('inf') and eta_convergence < eta_iterations * 0.3:
+                            eta_str += " (likely to converge)"
+                    else:
+                        eta_str = "ETA: calculating..."
+                    
+                    print(f"  Iteration {iteration}/{self.max_iterations} ({progress:.1f}%) | "
+                          f"Best: {best.total_distance:.2f} | Time: {elapsed:.1f}s | {eta_str}", flush=True)
+                else:
+                    print(f"  Iteration {iteration}/{self.max_iterations} ({progress:.1f}%) | "
+                          f"Best: {best.total_distance:.2f} | Time: {elapsed:.1f}s", flush=True)
+                
+                last_report_time = time.time()
+            
             k = 1
             
             while k <= k_max:
@@ -386,6 +506,12 @@ class VNS:
                     if candidate.total_distance < best.total_distance:
                         best = candidate
                         no_improvement = 0
+                        last_improvement_time = time.time()
+                        last_improvement_iteration = iteration
+                        if self.verbose:
+                            elapsed = time.time() - start_time
+                            print(f"  ✓ Improvement at iteration {iteration}: "
+                                  f"{best.total_distance:.2f} ({elapsed:.1f}s)", flush=True)
                     else:
                         no_improvement += 1
                 else:
@@ -395,7 +521,13 @@ class VNS:
                     break
             
             if no_improvement >= self.max_no_improvement:
+                if self.verbose:
+                    print(f"  ⏹ No improvement for {self.max_no_improvement} iterations. Stopping.")
                 break
+        
+        total_time = time.time() - start_time
+        if self.verbose:
+            print(f"  ✓ Completed in {total_time:.1f}s | Final distance: {best.total_distance:.2f}")
         
         return best
 

@@ -27,7 +27,9 @@ def run_benchmark(instances_dir: str = "instances/cvrp",
                   output_dir: str = "visualizations",
                   max_iterations: int = 2000,
                   max_no_improvement: int = 200,
-                  random_seed: int = 42):
+                  random_seed: int = 42,
+                  time_limit: Optional[float] = None,
+                  quick_test: bool = False):
     """
     Εκτέλεση benchmark σε όλα τα instances
     
@@ -37,6 +39,8 @@ def run_benchmark(instances_dir: str = "instances/cvrp",
         max_iterations: Μέγιστος αριθμός iterations για VNS
         max_no_improvement: Μέγιστος αριθμός iterations χωρίς βελτίωση
         random_seed: Random seed για reproducibility
+        time_limit: Time limit σε seconds (None = no limit)
+        quick_test: Αν True, χρησιμοποιεί μικρότερες παραμέτρους για γρήγορο test
     """
     instances_path = Path(instances_dir)
     output_path = Path(output_dir)
@@ -50,12 +54,26 @@ def run_benchmark(instances_dir: str = "instances/cvrp",
         print("Βεβαιωθείτε ότι έχετε instances στον φάκελο instances/")
         return
     
+    # Quick test mode: reduce parameters
+    if quick_test:
+        max_iterations = min(max_iterations, 500)
+        max_no_improvement = min(max_no_improvement, 50)
+        if time_limit is None:
+            time_limit = 60.0  # 1 minute per instance in quick test mode
+        print("="*70)
+        print("QUICK TEST MODE - Reduced parameters")
+        print("="*70)
+    
     print("="*70)
     print("BENCHMARK: VNS vs BEST-KNOWN SOLUTIONS")
     print("="*70)
     print(f"Instances directory: {instances_dir}")
     print(f"Output directory: {output_dir}")
     print(f"Found {len(vrp_files)} instances")
+    print(f"Max iterations: {max_iterations}")
+    print(f"Max no improvement: {max_no_improvement}")
+    if time_limit:
+        print(f"Time limit per instance: {time_limit:.0f}s")
     print("="*70)
     
     results = []
@@ -92,7 +110,9 @@ def run_benchmark(instances_dir: str = "instances/cvrp",
                 instance=instance,
                 max_iterations=max_iterations,
                 max_no_improvement=max_no_improvement,
-                random_seed=random_seed
+                random_seed=random_seed,
+                verbose=True,
+                time_limit=time_limit
             )
             
             vns_solution = solver.solve()
@@ -253,6 +273,10 @@ if __name__ == "__main__":
                        help='Max iterations without improvement')
     parser.add_argument('--seed', '-s', type=int, default=42,
                        help='Random seed')
+    parser.add_argument('--time-limit', '-t', type=float, default=None,
+                       help='Time limit per instance in seconds')
+    parser.add_argument('--quick', '-q', action='store_true',
+                       help='Quick test mode with reduced parameters')
     
     args = parser.parse_args()
     
@@ -261,6 +285,8 @@ if __name__ == "__main__":
         output_dir=args.output,
         max_iterations=args.iterations,
         max_no_improvement=args.no_improvement,
-        random_seed=args.seed
+        random_seed=args.seed,
+        time_limit=args.time_limit,
+        quick_test=args.quick
     )
 
