@@ -56,54 +56,12 @@ python main.py --example
 
 # Solve with specific instance
 python main.py --instance instances/cvrp/X-n101-k25.vrp
+
+# With custom parameters
+python main.py --instance instances/cvrp/X-n101-k25.vrp --iterations 2000 --seed 42
 ```
 
-## Εγκατάσταση
-
-```bash
-pip install -r requirements.txt
-```
-
-## Χρήση
-
-### Βασική επίλυση CVRP με VNS
-
-```bash
-# Με example instance
-python main.py --example
-
-# Με VRPLIB instance
-python main.py --instance path/to/instance.vrp
-
-# Με custom parameters
-python main.py --instance instance.vrp --iterations 2000 --seed 42
-```
-
-### Benchmarking - Σύγκριση με Best-known Solutions
-
-Το benchmark script εκτελεί VNS σε όλα τα instances και συγκρίνει με best-known solutions:
-
-```bash
-# Default: Run on all 100 CVRP instances
-python benchmark.py
-
-# Quick test on 3 instances
-python benchmark.py --instances instances/cvrp_benchmark
-
-# Custom output directory
-python benchmark.py --output my_results
-```
-
-**Output:**
-- `visualizations/` folder: Comparison plots για κάθε instance
-- `visualizations/benchmark_summary.txt`: Summary report με gaps από best-known solutions
-
-Το benchmark script:
-- Φορτώνει όλα τα instances από τον καθορισμένο φάκελο
-- Εκτελεί VNS solver για κάθε instance
-- Συγκρίνει με best-known solutions (αν διαθέσιμα)
-- Υπολογίζει gap percentage από optimal
-- Αποθηκεύει γραφήματα και summary report
+## Advanced Usage
 
 ### Παράμετροι main.py
 
