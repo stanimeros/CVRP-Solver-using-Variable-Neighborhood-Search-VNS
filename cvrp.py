@@ -95,6 +95,25 @@ class VNS:
         if random_seed is not None:
             random.seed(random_seed)
     
+    def _distance(self, cid1: int, cid2: int) -> float:
+        """Calculate distance between two customer IDs (O(1))"""
+        if cid1 == -1:  # Depot
+            return self.instance.distance(self.instance.depot, self.instance.customers[cid2])
+        elif cid2 == -1:  # Depot
+            return self.instance.distance(self.instance.customers[cid1], self.instance.depot)
+        else:
+            return self.instance.distance(self.instance.customers[cid1], self.instance.customers[cid2])
+    
+    def _route_distance(self, route: List[int]) -> float:
+        """Calculate total distance of a route including depot connections (O(n))"""
+        if not route:
+            return 0.0
+        dist = self._distance(-1, route[0])  # Depot to first
+        for i in range(len(route) - 1):
+            dist += self._distance(route[i], route[i + 1])
+        dist += self._distance(route[-1], -1)  # Last to depot
+        return dist
+    
     def initial_solution(self) -> Solution:
         """Generate initial solution using nearest neighbor heuristic"""
         solution = Solution(self.instance)
@@ -140,41 +159,67 @@ class VNS:
         return solution
     
     def two_opt(self, solution: Solution, route_idx: int) -> bool:
-        """2-opt neighborhood: reverse a segment of a route"""
+        """2-opt neighborhood: reverse a segment of a route (delta evaluation)"""
         route = solution.routes[route_idx]
         if len(route) < 2:
             return False
         
-        improved = False
-        best_solution = solution.copy()
+        best_gain = 0.0
+        best_i = -1
+        best_j = -1
         
         for i in range(len(route)):
             for j in range(i + 2, len(route)):
-                # Create new route by reversing segment [i+1:j+1]
-                new_route = route[:i+1] + route[i+1:j+1][::-1] + route[j+1:]
-                new_solution = solution.copy()
-                new_solution.routes[route_idx] = new_route
-                new_solution.calculate_distance()
+                # Calculate delta: removed edges - added edges
+                # Removed: (i, i+1) and (j, j+1)
+                # Added: (i, j) and (i+1, j+1)
+                removed_dist = self._distance(route[i], route[i+1])
+                if j + 1 < len(route):
+                    removed_dist += self._distance(route[j], route[j+1])
+                else:
+                    removed_dist += self._distance(route[j], -1)  # Last to depot
                 
-                if new_solution.total_distance < best_solution.total_distance:
-                    best_solution = new_solution
-                    improved = True
+                added_dist = self._distance(route[i], route[j])
+                if j + 1 < len(route):
+                    added_dist += self._distance(route[i+1], route[j+1])
+                else:
+                    added_dist += self._distance(route[i+1], -1)  # Last to depot
+                
+                gain = removed_dist - added_dist
+                
+                if gain > best_gain:
+                    best_gain = gain
+                    best_i = i
+                    best_j = j
         
-        if improved:
-            solution.routes = best_solution.routes
-            solution.total_distance = best_solution.total_distance
-        return improved
+        if best_gain > 0.0:
+            # Apply the best move
+            route[best_i+1:best_j+1] = route[best_i+1:best_j+1][::-1]
+            solution.total_distance -= best_gain
+            return True
+        
+        return False
     
     def relocate(self, solution: Solution) -> bool:
-        """Relocate neighborhood: move a customer from one route to another"""
-        improved = False
-        best_solution = solution.copy()
+        """Relocate neighborhood: move a customer from one route to another (delta evaluation)"""
+        best_gain = 0.0
+        best_r1_idx = -1
+        best_c1_idx = -1
+        best_r2_idx = -1
+        best_pos = -1
         
         for r1_idx in range(len(solution.routes)):
             route1 = solution.routes[r1_idx]
             for c1_idx in range(len(route1)):
                 customer_id = route1[c1_idx]
                 customer = self.instance.customers[customer_id]
+                
+                # Calculate removal cost from route1
+                prev_cid = route1[c1_idx - 1] if c1_idx > 0 else -1  # Depot if first
+                next_cid = route1[c1_idx + 1] if c1_idx + 1 < len(route1) else -1  # Depot if last
+                removed_dist = self._distance(prev_cid, customer_id) + self._distance(customer_id, next_cid)
+                added_dist = self._distance(prev_cid, next_cid)
+                route1_gain = removed_dist - added_dist
                 
                 # Try inserting in all other positions
                 for r2_idx in range(len(solution.routes)):
@@ -184,40 +229,78 @@ class VNS:
                     route2 = solution.routes[r2_idx]
                     route2_demand = solution.get_route_demand(route2)
                     
+                    # Capacity check first (cheap)
                     if route2_demand + customer.demand > self.instance.capacity:
                         continue
                     
                     for pos in range(len(route2) + 1):
-                        new_solution = solution.copy()
-                        # Remove customer from route1
-                        new_solution.routes[r1_idx] = route1[:c1_idx] + route1[c1_idx+1:]
-                        # Insert customer in route2
-                        new_solution.routes[r2_idx] = route2[:pos] + [customer_id] + route2[pos:]
+                        # Calculate insertion cost in route2
+                        if pos == 0:
+                            # Insert at beginning: remove depot->first, add depot->customer->first
+                            if route2:
+                                removed_dist2 = self._distance(-1, route2[0])
+                                added_dist2 = self._distance(-1, customer_id) + self._distance(customer_id, route2[0])
+                            else:
+                                # Empty route: add depot->customer->depot
+                                removed_dist2 = 0.0
+                                added_dist2 = self._distance(-1, customer_id) + self._distance(customer_id, -1)
+                        elif pos == len(route2):
+                            # Insert at end: remove last->depot, add last->customer->depot
+                            removed_dist2 = self._distance(route2[-1], -1)
+                            added_dist2 = self._distance(route2[-1], customer_id) + self._distance(customer_id, -1)
+                        else:
+                            # Insert in middle: remove prev->next, add prev->customer->next
+                            prev_cid2 = route2[pos - 1]
+                            next_cid2 = route2[pos]
+                            removed_dist2 = self._distance(prev_cid2, next_cid2)
+                            added_dist2 = self._distance(prev_cid2, customer_id) + self._distance(customer_id, next_cid2)
                         
-                        # Remove empty routes
-                        new_solution.routes = [r for r in new_solution.routes if r]
+                        route2_cost = added_dist2 - removed_dist2
+                        total_gain = route1_gain - route2_cost
                         
-                        new_solution.calculate_distance()
-                        
-                        if new_solution.total_distance < best_solution.total_distance:
-                            best_solution = new_solution
-                            improved = True
+                        if total_gain > best_gain:
+                            best_gain = total_gain
+                            best_r1_idx = r1_idx
+                            best_c1_idx = c1_idx
+                            best_r2_idx = r2_idx
+                            best_pos = pos
         
-        if improved:
-            solution.routes = best_solution.routes
-            solution.total_distance = best_solution.total_distance
-        return improved
+        if best_gain > 0.0:
+            # Apply the best move
+            customer_id = solution.routes[best_r1_idx][best_c1_idx]
+            
+            # Remove from route1
+            solution.routes[best_r1_idx].pop(best_c1_idx)
+            
+            # Insert in route2
+            solution.routes[best_r2_idx].insert(best_pos, customer_id)
+            
+            # Remove empty routes
+            solution.routes = [r for r in solution.routes if r]
+            
+            # Update distance incrementally
+            solution.total_distance -= best_gain
+            return True
+        
+        return False
     
     def swap(self, solution: Solution) -> bool:
-        """Swap neighborhood: swap two customers between routes"""
-        improved = False
-        best_solution = solution.copy()
+        """Swap neighborhood: swap two customers between routes (delta evaluation)"""
+        best_gain = 0.0
+        best_r1_idx = -1
+        best_c1_idx = -1
+        best_r2_idx = -1
+        best_c2_idx = -1
         
         for r1_idx in range(len(solution.routes)):
             route1 = solution.routes[r1_idx]
             for c1_idx in range(len(route1)):
                 customer1_id = route1[c1_idx]
                 customer1 = self.instance.customers[customer1_id]
+                
+                # Calculate edges around customer1 in route1
+                prev1_cid = route1[c1_idx - 1] if c1_idx > 0 else -1
+                next1_cid = route1[c1_idx + 1] if c1_idx + 1 < len(route1) else -1
                 
                 for r2_idx in range(r1_idx + 1, len(solution.routes)):
                     route2 = solution.routes[r2_idx]
@@ -228,31 +311,56 @@ class VNS:
                         customer2_id = route2[c2_idx]
                         customer2 = self.instance.customers[customer2_id]
                         
-                        # Check capacity constraints
+                        # Check capacity constraints first (cheap)
                         if (route1_demand + customer2.demand > self.instance.capacity or
                             route2_demand - customer2.demand + customer1.demand > self.instance.capacity):
                             continue
                         
-                        new_solution = solution.copy()
-                        # Swap customers
-                        new_solution.routes[r1_idx] = route1[:c1_idx] + [customer2_id] + route1[c1_idx+1:]
-                        new_solution.routes[r2_idx] = route2[:c2_idx] + [customer1_id] + route2[c2_idx+1:]
+                        # Calculate edges around customer2 in route2
+                        prev2_cid = route2[c2_idx - 1] if c2_idx > 0 else -1
+                        next2_cid = route2[c2_idx + 1] if c2_idx + 1 < len(route2) else -1
                         
-                        new_solution.calculate_distance()
+                        # Calculate delta for route1: remove customer1, add customer2
+                        removed1 = self._distance(prev1_cid, customer1_id) + self._distance(customer1_id, next1_cid)
+                        added1 = self._distance(prev1_cid, customer2_id) + self._distance(customer2_id, next1_cid)
+                        route1_gain = removed1 - added1
                         
-                        if new_solution.total_distance < best_solution.total_distance:
-                            best_solution = new_solution
-                            improved = True
+                        # Calculate delta for route2: remove customer2, add customer1
+                        removed2 = self._distance(prev2_cid, customer2_id) + self._distance(customer2_id, next2_cid)
+                        added2 = self._distance(prev2_cid, customer1_id) + self._distance(customer1_id, next2_cid)
+                        route2_gain = removed2 - added2
+                        
+                        total_gain = route1_gain + route2_gain
+                        
+                        if total_gain > best_gain:
+                            best_gain = total_gain
+                            best_r1_idx = r1_idx
+                            best_c1_idx = c1_idx
+                            best_r2_idx = r2_idx
+                            best_c2_idx = c2_idx
         
-        if improved:
-            solution.routes = best_solution.routes
-            solution.total_distance = best_solution.total_distance
-        return improved
+        if best_gain > 0.0:
+            # Apply the best swap
+            customer1_id = solution.routes[best_r1_idx][best_c1_idx]
+            customer2_id = solution.routes[best_r2_idx][best_c2_idx]
+            
+            solution.routes[best_r1_idx][best_c1_idx] = customer2_id
+            solution.routes[best_r2_idx][best_c2_idx] = customer1_id
+            
+            # Update distance incrementally
+            solution.total_distance -= best_gain
+            return True
+        
+        return False
     
     def or_opt(self, solution: Solution) -> bool:
-        """Or-opt neighborhood: relocate a chain of 2-3 consecutive customers"""
-        improved = False
-        best_solution = solution.copy()
+        """Or-opt neighborhood: relocate a chain of 2-3 consecutive customers (delta evaluation)"""
+        best_gain = 0.0
+        best_r1_idx = -1
+        best_start_idx = -1
+        best_chain_len = -1
+        best_r2_idx = -1
+        best_pos = -1
         
         for r1_idx in range(len(solution.routes)):
             route1 = solution.routes[r1_idx]
@@ -268,6 +376,16 @@ class VNS:
                     chain = route1[start_idx:start_idx + chain_len]
                     chain_demand = sum(self.instance.customers[cid].demand for cid in chain)
                     
+                    # Calculate removal cost from route1
+                    prev_cid = route1[start_idx - 1] if start_idx > 0 else -1
+                    next_cid = route1[start_idx + chain_len] if start_idx + chain_len < len(route1) else -1
+                    chain_first = chain[0]
+                    chain_last = chain[-1]
+                    
+                    removed_dist = self._distance(prev_cid, chain_first) + self._distance(chain_last, next_cid)
+                    added_dist = self._distance(prev_cid, next_cid)
+                    route1_gain = removed_dist - added_dist
+                    
                     # Try inserting chain in all other positions
                     for r2_idx in range(len(solution.routes)):
                         route2 = solution.routes[r2_idx]
@@ -277,25 +395,59 @@ class VNS:
                             continue
                         
                         for pos in range(len(route2) + 1):
-                            new_solution = solution.copy()
-                            # Remove chain from route1
-                            new_solution.routes[r1_idx] = route1[:start_idx] + route1[start_idx+chain_len:]
-                            # Insert chain in route2
-                            new_solution.routes[r2_idx] = route2[:pos] + chain + route2[pos:]
+                            # Calculate insertion cost in route2
+                            if pos == 0:
+                                # Insert at beginning
+                                if route2:
+                                    removed_dist2 = self._distance(-1, route2[0])
+                                    added_dist2 = self._distance(-1, chain_first) + self._distance(chain_last, route2[0])
+                                else:
+                                    # Empty route
+                                    removed_dist2 = 0.0
+                                    added_dist2 = self._distance(-1, chain_first) + self._distance(chain_last, -1)
+                            elif pos == len(route2):
+                                # Insert at end
+                                removed_dist2 = self._distance(route2[-1], -1)
+                                added_dist2 = self._distance(route2[-1], chain_first) + self._distance(chain_last, -1)
+                            else:
+                                # Insert in middle
+                                prev_cid2 = route2[pos - 1]
+                                next_cid2 = route2[pos]
+                                removed_dist2 = self._distance(prev_cid2, next_cid2)
+                                added_dist2 = self._distance(prev_cid2, chain_first) + self._distance(chain_last, next_cid2)
                             
-                            # Remove empty routes
-                            new_solution.routes = [r for r in new_solution.routes if r]
+                            route2_cost = added_dist2 - removed_dist2
+                            total_gain = route1_gain - route2_cost
                             
-                            new_solution.calculate_distance()
-                            
-                            if new_solution.total_distance < best_solution.total_distance:
-                                best_solution = new_solution
-                                improved = True
+                            if total_gain > best_gain:
+                                best_gain = total_gain
+                                best_r1_idx = r1_idx
+                                best_start_idx = start_idx
+                                best_chain_len = chain_len
+                                best_r2_idx = r2_idx
+                                best_pos = pos
         
-        if improved:
-            solution.routes = best_solution.routes
-            solution.total_distance = best_solution.total_distance
-        return improved
+        if best_gain > 0.0:
+            # Apply the best move
+            chain = solution.routes[best_r1_idx][best_start_idx:best_start_idx + best_chain_len]
+            
+            # Remove chain from route1
+            solution.routes[best_r1_idx] = (solution.routes[best_r1_idx][:best_start_idx] + 
+                                            solution.routes[best_r1_idx][best_start_idx + best_chain_len:])
+            
+            # Insert chain in route2
+            solution.routes[best_r2_idx] = (solution.routes[best_r2_idx][:best_pos] + 
+                                           chain + 
+                                           solution.routes[best_r2_idx][best_pos:])
+            
+            # Remove empty routes
+            solution.routes = [r for r in solution.routes if r]
+            
+            # Update distance incrementally
+            solution.total_distance -= best_gain
+            return True
+        
+        return False
     
     def local_search(self, solution: Solution) -> Solution:
         """Apply local search until no improvement"""
